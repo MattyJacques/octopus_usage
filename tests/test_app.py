@@ -106,6 +106,15 @@ def test_sync_failure_returns_502_but_cache_still_served(tmp_path):
         assert data["sync_error"] is not None
 
 
+def test_index_serves_dashboard_when_configured(tmp_path):
+    app = make_test_app(tmp_path)
+    with TestClient(app) as client:
+        page = client.get("/")
+        assert page.status_code == 200
+        assert "history-chart" in page.text
+        assert client.get("/static/chart.umd.js").status_code == 200
+
+
 def test_setup_page_when_unconfigured(tmp_path, monkeypatch):
     monkeypatch.delenv("OCTOPUS_API_KEY", raising=False)
     monkeypatch.delenv("OCTOPUS_ACCOUNT_NUMBER", raising=False)

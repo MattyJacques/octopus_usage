@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Octopus Usage</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="viz-root">
+<main>
+  <header>
+    <h1>Energy usage</h1>
+    <div class="sync">
+      <span id="last-sync" class="muted"></span>
+      <button id="refresh">Refresh</button>
+    </div>
+  </header>
+  <div id="banner" class="banner" hidden></div>
+
+  <section id="tiles"></section>
+
+  <section class="card">
+    <div class="controls">
+      <h2>History</h2>
+      <div class="btn-group" id="period" role="group" aria-label="Period">
+        <button data-days="7">7d</button>
+        <button data-days="30" class="active">30d</button>
+        <button data-days="90">90d</button>
+        <button data-days="365">1y</button>
+      </div>
+      <div class="btn-group" id="unit" role="group" aria-label="Unit">
+        <button data-unit="kwh" class="active">kWh</button>
+        <button data-unit="cost">&pound;</button>
+      </div>
+    </div>
+    <div class="chart"><canvas id="history-chart"></canvas></div>
+  </section>
+
+  <section class="card">
+    <div class="controls">
+      <h2>Next 30 days</h2>
+      <div class="btn-group" id="forecast-fuel" role="group" aria-label="Fuel"></div>
+    </div>
+    <div class="chart"><canvas id="forecast-chart"></canvas></div>
+    <p class="muted">Forecast from your seasonal and weekday usage patterns; the shaded area is the likely range.</p>
+  </section>
+
+  <footer class="muted">
+    Costs are estimates including VAT &mdash; your bill may differ slightly.
+    Smart meter data usually lags about a day.
+  </footer>
+</main>
+<script src="/static/chart.umd.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

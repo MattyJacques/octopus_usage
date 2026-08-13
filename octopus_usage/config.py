@@ -2,7 +2,6 @@
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -18,7 +17,7 @@ class Config:
     db_path: str = "octopus_usage.db"
 
 
-def load_config(env_file: Optional[str] = ".env") -> Config:
+def load_config(env_file: str | None = ".env") -> Config:
     if env_file and Path(env_file).exists():
         load_dotenv(env_file, override=True)
     api_key = os.environ.get("OCTOPUS_API_KEY", "").strip()

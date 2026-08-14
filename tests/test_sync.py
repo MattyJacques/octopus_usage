@@ -5,7 +5,7 @@ import pytest
 
 from octopus_usage import costs, db, sync
 from octopus_usage.octopus_client import OctopusClient
-from tests.fixtures import ACCOUNT, make_handler
+from tests.fixtures import ACCOUNT, consumption_results, make_handler
 
 
 @pytest.fixture
@@ -85,6 +85,69 @@ def test_backfill_window_on_first_run(conn):
     meters = sync.discover_meters(ACCOUNT)
     sync.sync_fuel_readings(conn, make_client(spy_handler), "electricity", meters["electricity"], now=now)
     assert seen[0].url.params["period_from"] == "2024-08-13T00:00:00+00:00"
+
+
+def test_sync_fuel_rates_clips_multi_agreement_switch(conn):
+    """A tariff switch mid-history must not let the newer agreement's rate rows
+    overwrite/interleave the older agreement's rows for dates before the switch
+    (rates/standing_charges are keyed on (fuel, valid_from) alone)."""
+    account = {
+        "properties": [{
+            "electricity_meter_points": [{
+                "mpan": "1200000000000",
+                "is_export": False,
+                "meters": [{"serial_number": "ELEC001"}],
+                "agreements": [
+                    {
+                        "tariff_code": "E-1R-OLD-1-A",
+                        "valid_from": "2023-01-01T00:00:00Z",
+                        "valid_to": "2026-01-15T00:00:00Z",
+                    },
+                    {
+                        "tariff_code": "E-1R-NEW-1-A",
+                        "valid_from": "2026-01-15T00:00:00Z",
+                        "valid_to": None,
+                    },
+                ],
+            }],
+            "gas_meter_points": [],
+        }],
+    }
+    meter = sync.discover_meters(account)["electricity"]
+
+    # Seed readings either side of the switch (winter dates, UTC == Europe/London).
+    for r in consumption_results([1.0] * 4, start="2026-01-14T00:00:00Z"):
+        r["consumption_kwh"] = r["consumption"]
+        db.upsert_readings(conn, "electricity", [r])
+    for r in consumption_results([1.0] * 4, start="2026-01-16T00:00:00Z"):
+        r["consumption_kwh"] = r["consumption"]
+        db.upsert_readings(conn, "electricity", [r])
+
+    def handler(request):
+        # Products APIs return their own full history regardless of the
+        # user's agreement window or the requested period_from -- that's
+        # the failure mode this test guards against.
+        path = request.url.path
+        if "OLD-1" in path:
+            value = 10.0
+        elif "NEW-1" in path:
+            value = 30.0
+        else:
+            return httpx.Response(404, json={"detail": "not found"})
+        rows = [{"value_inc_vat": value, "valid_from": "2023-01-01T00:00:00Z", "valid_to": None}]
+        return httpx.Response(200, json={"count": 1, "next": None, "results": rows})
+
+    sync.sync_fuel_rates(conn, make_client(handler), "electricity", meter)
+
+    rates = db.rates_for(conn, "electricity")
+    old_row = next(r for r in rates if r["tariff_code"] == "E-1R-OLD-1-A")
+    assert old_row["valid_to"] == "2026-01-15T00:00:00+00:00"
+
+    starts = [r["valid_from"] for r in rates]
+    rate_14 = costs._lookup(rates, starts, "unit_rate_inc_vat", "2026-01-14T06:00:00+00:00")
+    rate_16 = costs._lookup(rates, starts, "unit_rate_inc_vat", "2026-01-16T06:00:00+00:00")
+    assert rate_14 == 10.0
+    assert rate_16 == 30.0
 
 
 def test_gas_unit_decision_is_sticky(conn):

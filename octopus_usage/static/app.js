@@ -57,7 +57,7 @@ function baseOptions(valueFmt) {
         beginAtZero: true,
         grid: { color: cssVar("--grid") },
         border: { display: false },
-        ticks: { color: cssVar("--muted") },
+        ticks: { color: cssVar("--muted"), callback: (value) => valueFmt(value) },
       },
     },
     plugins: {

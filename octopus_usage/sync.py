@@ -68,25 +68,60 @@ def sync_fuel_readings(conn, client, fuel, meter, now=None):
     return 0
 
 
+def _clip_row(row, fetch_from, ag_valid_to):
+    """Clip a fetched rate/standing-charge row to an agreement's own
+    [fetch_from, ag_valid_to) window; None if the row doesn't overlap it at all.
+
+    Needed because products APIs return their full rate history regardless of
+    the requested period_from, and the rates/standing_charges tables are keyed
+    on (fuel, valid_from) alone, so an unclipped row from one agreement can
+    collide with (and overwrite) a row from another agreement covering the
+    same tariff switch."""
+    row_from = db.to_utc_iso(row["valid_from"])
+    row_to = db.to_utc_iso(row["valid_to"]) if row.get("valid_to") else None
+    if ag_valid_to and row_from >= ag_valid_to:
+        return None
+    if row_to is not None and row_to <= fetch_from:
+        return None
+    if row_from < fetch_from:
+        row_from = fetch_from
+    if ag_valid_to and (row_to is None or row_to > ag_valid_to):
+        row_to = ag_valid_to
+    return {**row, "valid_from": row_from, "valid_to": row_to}
+
+
+def _clip_rows(rows, fetch_from, ag_valid_to):
+    clipped = (_clip_row(r, fetch_from, ag_valid_to) for r in rows)
+    return [r for r in clipped if r is not None]
+
+
 def sync_fuel_rates(conn, client, fuel, meter):
-    """Fetch unit rates + standing charges for agreements overlapping stored readings."""
+    """Fetch unit rates + standing charges for agreements overlapping stored readings.
+
+    Each agreement's rows are fetched from (and clipped to) that agreement's
+    own window so a later tariff's rows can't overwrite an earlier tariff's
+    rows for dates before the switch (see _clip_row)."""
     earliest = db.earliest_interval_start(conn, fuel)
     if earliest is None:
         return 0
     count = 0
     for ag in meter["agreements"]:
         valid_to = ag.get("valid_to")
-        if valid_to and db.to_utc_iso(valid_to) < earliest:
+        ag_valid_to = db.to_utc_iso(valid_to) if valid_to else None
+        if ag_valid_to and ag_valid_to < earliest:
             continue
+        fetch_from = max(earliest, db.to_utc_iso(ag["valid_from"]))
         product = product_code_from_tariff(ag["tariff_code"])
-        count += db.upsert_rates(
-            conn, fuel, ag["tariff_code"],
-            client.unit_rates(product, ag["tariff_code"], fuel, period_from=earliest),
+        rate_rows = _clip_rows(
+            client.unit_rates(product, ag["tariff_code"], fuel, period_from=fetch_from),
+            fetch_from, ag_valid_to,
         )
-        db.upsert_standing_charges(
-            conn, fuel, ag["tariff_code"],
-            client.standing_charges(product, ag["tariff_code"], fuel, period_from=earliest),
+        count += db.upsert_rates(conn, fuel, ag["tariff_code"], rate_rows)
+        sc_rows = _clip_rows(
+            client.standing_charges(product, ag["tariff_code"], fuel, period_from=fetch_from),
+            fetch_from, ag_valid_to,
         )
+        db.upsert_standing_charges(conn, fuel, ag["tariff_code"], sc_rows)
     return count
 
 

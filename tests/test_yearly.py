@@ -64,3 +64,48 @@ def test_forecast_bucket_cost_none_without_rate():
     months = yearly.monthly_buckets([], points, TODAY, rate=None, sc=48.0)
     assert all(m["cost_pence"] is None for m in months)
     assert all(m["forecast"] for m in months)
+
+
+def test_totals_last_365_needs_full_history():
+    long = make_daily(TODAY - timedelta(days=400), TODAY - timedelta(days=1))
+    t = yearly.totals(long, [], TODAY, rate=10.0, sc=48.0)
+    assert t["last_365"]["kwh"] == 365 * 24.0
+    assert t["last_365"]["cost_pence"] == 365 * 288.0
+
+    short = make_daily(TODAY - timedelta(days=100), TODAY - timedelta(days=1))
+    t = yearly.totals(short, [], TODAY, rate=10.0, sc=48.0)
+    assert t["last_365"] == {"kwh": None, "cost_pence": None}
+
+
+def test_totals_next_365():
+    points = make_points(TODAY, 365)
+    t = yearly.totals([], points, TODAY, rate=10.0, sc=48.0)
+    assert t["next_365"]["kwh"] == 365 * 20.0
+    assert t["next_365"]["cost_pence"] == 365 * 20.0 * 10.0 + 365 * 48.0
+
+    t = yearly.totals([], [], TODAY, rate=10.0, sc=48.0)
+    assert t["next_365"] == {"kwh": None, "cost_pence": None}
+
+
+def test_totals_calendar_prev_requires_complete_year():
+    covered = make_daily(date(2024, 12, 1), date(2026, 8, 14))
+    t = yearly.totals(covered, [], TODAY, rate=10.0, sc=48.0)
+    assert t["calendar_prev"]["year"] == 2025
+    assert t["calendar_prev"]["kwh"] == 365 * 24.0
+
+    partial = make_daily(date(2025, 3, 1), date(2026, 8, 14))
+    t = yearly.totals(partial, [], TODAY, rate=10.0, sc=48.0)
+    assert t["calendar_prev"] == {"year": 2025, "kwh": None, "cost_pence": None}
+
+
+def test_totals_calendar_current_combines_actual_and_clipped_forecast():
+    daily = make_daily(date(2026, 1, 1), date(2026, 8, 14))
+    points = make_points(date(2026, 8, 15), 365)
+    t = yearly.totals(daily, points, TODAY, rate=10.0, sc=48.0)
+    actual_days = (date(2026, 8, 14) - date(2026, 1, 1)).days + 1   # 226
+    fc_days = (date(2026, 12, 31) - date(2026, 8, 15)).days + 1     # 139, clipped at Dec 31
+    assert t["calendar_current"]["year"] == 2026
+    assert t["calendar_current"]["kwh"] == actual_days * 24.0 + fc_days * 20.0
+    assert t["calendar_current"]["cost_pence"] == (
+        actual_days * 288.0 + fc_days * 20.0 * 10.0 + fc_days * 48.0
+    )

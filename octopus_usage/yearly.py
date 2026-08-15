@@ -60,3 +60,53 @@ def monthly_buckets(daily, points, today, rate, sc):
 
     out.sort(key=lambda e: (e["month"], e["forecast"]))
     return out
+
+
+def _window(daily, start, end):
+    """kWh and None-propagating cost over daily rows with start <= date <= end."""
+    sel = [d for d in daily if start <= d["date"] <= end]
+    costs = [d["cost_pence"] for d in sel]
+    return (
+        sum(d["kwh"] for d in sel),
+        sum(costs) if sel and None not in costs else None,
+    )
+
+
+def totals(daily, points, today, rate, sc):
+    """Rolling-365 and calendar-year totals; None where data can't support them."""
+    if daily and daily[0]["date"] <= today - timedelta(days=365):
+        kwh, cost = _window(daily, today - timedelta(days=365), today - timedelta(days=1))
+        last_365 = {"kwh": kwh, "cost_pence": cost}
+    else:
+        last_365 = {"kwh": None, "cost_pence": None}
+
+    if points:
+        fc_kwh = sum(p["kwh"] for p in points)
+        next_365 = {"kwh": fc_kwh, "cost_pence": _forecast_cost(fc_kwh, len(points), rate, sc)}
+    else:
+        next_365 = {"kwh": None, "cost_pence": None}
+
+    prev = today.year - 1
+    if (daily and daily[0]["date"] <= date(prev, 1, 1)
+            and daily[-1]["date"] >= date(prev, 12, 31)):
+        kwh, cost = _window(daily, date(prev, 1, 1), date(prev, 12, 31))
+        calendar_prev = {"year": prev, "kwh": kwh, "cost_pence": cost}
+    else:
+        calendar_prev = {"year": prev, "kwh": None, "cost_pence": None}
+
+    kwh, cost = _window(daily, date(today.year, 1, 1), today)
+    fc_sel = [p for p in points if p["date"] <= date(today.year, 12, 31)]
+    fc_kwh = sum(p["kwh"] for p in fc_sel)
+    fc_cost = _forecast_cost(fc_kwh, len(fc_sel), rate, sc)
+    calendar_current = {
+        "year": today.year,
+        "kwh": kwh + fc_kwh,
+        "cost_pence": cost + fc_cost if cost is not None and fc_cost is not None else None,
+    }
+
+    return {
+        "last_365": last_365,
+        "next_365": next_365,
+        "calendar_prev": calendar_prev,
+        "calendar_current": calendar_current,
+    }

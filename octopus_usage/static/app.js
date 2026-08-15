@@ -146,28 +146,30 @@ async function renderForecast() {
   const lastDate = (points.length ? points[points.length - 1] : hist.days[hist.days.length - 1]).date;
   const labels = dateRange(hist.days[0].date, lastDate);
   const color = cssVar(FUEL_META[fuel].colorVar);
-  // Join the two lines: the forecast series starts from the last actual point.
-  const lastActual = hist.days[hist.days.length - 1];
-  const fcRows = points.length
+  // Join the two lines: the forecast series starts from the last complete actual
+  // point (the newest day is often partial, which would drag the join to ~0).
+  const actualDays = hist.days.filter((d) => d.complete);
+  const lastActual = actualDays[actualDays.length - 1];
+  const fcRows = points.length && lastActual
     ? [{ date: lastActual.date, kwh: lastActual.kwh, lower: lastActual.kwh, upper: lastActual.kwh }, ...points]
-    : [];
+    : points;
   const datasets = [
     {
       label: "Actual",
-      data: series(labels, hist.days.filter((d) => d.complete), "kwh"),
+      data: series(labels, actualDays, "kwh"),
       borderColor: color, borderWidth: 2, pointRadius: 0, spanGaps: false,
     },
     {
       label: "Forecast",
       data: series(labels, fcRows, "kwh"),
-      borderColor: color, borderWidth: 2, borderDash: [5, 4], pointRadius: 0,
+      borderColor: color, borderWidth: 2, borderDash: [5, 4], pointRadius: 0, spanGaps: true,
     },
     {
       label: "_upper",
       data: series(labels, fcRows, "upper"),
-      borderWidth: 0, pointRadius: 0, fill: "+1", backgroundColor: hexToRgba(color, 0.18),
+      borderWidth: 0, pointRadius: 0, fill: "+1", backgroundColor: hexToRgba(color, 0.18), spanGaps: true,
     },
-    { label: "_lower", data: series(labels, fcRows, "lower"), borderWidth: 0, pointRadius: 0 },
+    { label: "_lower", data: series(labels, fcRows, "lower"), borderWidth: 0, pointRadius: 0, spanGaps: true },
   ];
   forecastChart?.destroy();
   forecastChart = new Chart($("#forecast-chart"), {

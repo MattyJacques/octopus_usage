@@ -116,6 +116,16 @@ def test_index_serves_dashboard_when_configured(tmp_path):
         assert client.get("/static/chart.umd.js").status_code == 200
 
 
+def test_responses_forbid_stale_caching(tmp_path):
+    # Without Cache-Control, browsers heuristically cache static files and can
+    # pair a stale app.js with fresh HTML after an upgrade (blank new sections).
+    app = make_test_app(tmp_path, seed=seed_elec_60_days)
+    with TestClient(app) as client:
+        assert client.get("/").headers["cache-control"] == "no-cache"
+        assert client.get("/static/app.js").headers["cache-control"] == "no-cache"
+        assert client.get("/api/summary").headers["cache-control"] == "no-cache"
+
+
 def test_setup_page_when_unconfigured(tmp_path, monkeypatch):
     monkeypatch.delenv("OCTOPUS_API_KEY", raising=False)
     monkeypatch.delenv("OCTOPUS_ACCOUNT_NUMBER", raising=False)

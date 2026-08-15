@@ -48,6 +48,14 @@ def create_app(config: Config | None = None, transport=None, sync_on_start: bool
 
     app = FastAPI(title="Octopus Usage", lifespan=lifespan)
 
+    @app.middleware("http")
+    async def no_stale_caching(request, call_next):
+        # Force revalidation (ETags make this a cheap 304): heuristic caching
+        # can otherwise pair a stale app.js with newer HTML after an upgrade.
+        response = await call_next(request)
+        response.headers.setdefault("Cache-Control", "no-cache")
+        return response
+
     def guard():
         if config_error is not None:
             raise HTTPException(status_code=503, detail=config_error)

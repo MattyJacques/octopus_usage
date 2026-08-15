@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from octopus_usage import costs, db, forecast, sync
+from octopus_usage import costs, db, forecast, sync, yearly
 from octopus_usage.config import Config, ConfigError, load_config
 from octopus_usage.octopus_client import OctopusClient, OctopusError
 
@@ -146,6 +146,25 @@ def create_app(config: Config | None = None, transport=None, sync_on_start: bool
                 "cost_pence": cost,
             })
         return {"points": points}
+
+    @app.get("/api/yearly")
+    def get_yearly():
+        guard()
+        conn = app.state.conn
+        today = date.today()
+        out = {"fuels": {}}
+        for fuel in db.FUELS:
+            daily = costs.daily_costs(conn, fuel)
+            if not daily:
+                continue
+            points = forecast.make_forecast(daily, days=365)
+            rate = costs.current_unit_rate(conn, fuel)
+            sc = costs.current_standing_charge(conn, fuel)
+            out["fuels"][fuel] = {
+                "months": yearly.monthly_buckets(daily, points, today, rate, sc),
+                "totals": yearly.totals(daily, points, today, rate, sc),
+            }
+        return out
 
     @app.post("/api/sync")
     def do_sync():

@@ -125,3 +125,35 @@ def test_setup_page_when_unconfigured(tmp_path, monkeypatch):
         assert page.status_code == 200
         assert "OCTOPUS_API_KEY" in page.text
         assert client.get("/api/summary").status_code == 503
+
+
+def test_yearly_endpoint(tmp_path):
+    app = make_test_app(tmp_path, seed=seed_elec_60_days)
+    with TestClient(app) as client:
+        data = client.get("/api/yearly").json()
+        assert set(data["fuels"]) == {"electricity"}
+        elec = data["fuels"]["electricity"]
+
+        # 60 days of history: rolling/calendar-prev totals must be null, not partial
+        assert elec["totals"]["last_365"] == {"kwh": None, "cost_pence": None}
+        assert elec["totals"]["calendar_prev"]["kwh"] is None
+        assert elec["totals"]["next_365"]["kwh"] == pytest.approx(365 * 24.0, rel=0.05)
+        assert elec["totals"]["next_365"]["cost_pence"] is not None
+        assert elec["totals"]["calendar_current"]["year"] == date.today().year
+        assert elec["totals"]["calendar_current"]["kwh"] > 0
+
+        months = elec["months"]
+        assert months, "expected month buckets"
+        assert set(months[0]) == {"month", "kwh", "cost_pence", "forecast"}
+        assert any(m["forecast"] for m in months)
+        assert any(not m["forecast"] for m in months)
+        assert [m["month"] for m in months] == sorted(m["month"] for m in months)
+
+
+def test_yearly_unconfigured_returns_503(tmp_path, monkeypatch):
+    monkeypatch.delenv("OCTOPUS_API_KEY", raising=False)
+    monkeypatch.delenv("OCTOPUS_ACCOUNT_NUMBER", raising=False)
+    monkeypatch.chdir(tmp_path)
+    app = create_app(sync_on_start=False)
+    with TestClient(app) as client:
+        assert client.get("/api/yearly").status_code == 503

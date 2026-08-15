@@ -36,6 +36,19 @@
     <div class="chart"><canvas id="history-chart"></canvas></div>
   </section>
 
+  <section class="card" id="year-card">
+    <div class="controls">
+      <h2>Year</h2>
+      <div class="btn-group" id="year-unit" role="group" aria-label="Unit">
+        <button data-unit="kwh" class="active">kWh</button>
+        <button data-unit="cost">&pound;</button>
+      </div>
+    </div>
+    <div id="year-tiles"></div>
+    <div class="chart"><canvas id="year-chart"></canvas></div>
+    <p class="muted">Shaded bars are forecast. Projections assume today's tariff.</p>
+  </section>
+
   <section class="card">
     <div class="controls">
       <h2>Next 30 days</h2>

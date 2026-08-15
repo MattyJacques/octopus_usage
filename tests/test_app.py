@@ -112,6 +112,7 @@ def test_index_serves_dashboard_when_configured(tmp_path):
         page = client.get("/")
         assert page.status_code == 200
         assert "history-chart" in page.text
+        assert "year-chart" in page.text
         assert client.get("/static/chart.umd.js").status_code == 200
 
 

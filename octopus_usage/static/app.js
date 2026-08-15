@@ -6,9 +6,11 @@ const FUEL_META = {
   gas: { label: "Gas", colorVar: "--series-2" },
 };
 
-const state = { days: 30, unit: "kwh", forecastFuel: null, fuels: [] };
+const state = { days: 30, unit: "kwh", yearUnit: "kwh", forecastFuel: null, fuels: [] };
 let historyChart = null;
 let forecastChart = null;
+let yearChart = null;
+let yearlyData = null;
 
 const fmt = {
   kwh: (v) => (v == null ? "—" : `${v.toFixed(1)} kWh`),
@@ -134,6 +136,73 @@ async function renderHistory() {
   });
 }
 
+function monthLabel(key) {
+  return new Date(key + "-15T12:00:00Z").toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
+}
+
+function renderYearTiles() {
+  const tiles = (t) => [
+    ["Last 365 days", t.last_365],
+    ["Next 365 days (projected)", t.next_365],
+    [`${t.calendar_prev.year} (calendar)`, t.calendar_prev],
+    [`${t.calendar_current.year} (projected)`, t.calendar_current],
+  ];
+  $("#year-tiles").innerHTML = state.fuels
+    .filter((fuel) => yearlyData.fuels[fuel])
+    .map((fuel) => `
+      <div class="fuel-row">
+        <h2><span class="swatch" style="background:${cssVar(FUEL_META[fuel].colorVar)}"></span>${FUEL_META[fuel].label}</h2>
+        <div class="tile-grid">${tiles(yearlyData.fuels[fuel].totals)
+          .map(([label, t]) => `<div class="tile">
+            <div class="tile-label">${label}</div>
+            <div class="tile-value">${fmt.kwh(t.kwh)}</div>
+            <div class="tile-sub">${fmt.cost(t.cost_pence)}</div>
+          </div>`)
+          .join("")}</div>
+      </div>`)
+    .join("");
+}
+
+function renderYearChart() {
+  const key = state.yearUnit === "cost" ? "cost_pence" : "kwh";
+  const monthKeys = [...new Set(
+    state.fuels.flatMap((f) => (yearlyData.fuels[f]?.months ?? []).map((m) => m.month))
+  )].sort();
+  if (!monthKeys.length) return;
+  const datasets = state.fuels.flatMap((fuel) => {
+    const months = yearlyData.fuels[fuel]?.months ?? [];
+    const color = cssVar(FUEL_META[fuel].colorVar);
+    const pick = (isFc) => monthKeys.map((mk) => {
+      const m = months.find((x) => x.month === mk && x.forecast === isFc);
+      return m ? m[key] : null;
+    });
+    const common = { stack: fuel, borderRadius: 4, maxBarThickness: 24, barPercentage: 0.9, categoryPercentage: 0.8 };
+    return [
+      { label: FUEL_META[fuel].label, data: pick(false), backgroundColor: color, ...common },
+      { label: `${FUEL_META[fuel].label} (forecast)`, data: pick(true), backgroundColor: hexToRgba(color, 0.35), ...common },
+    ];
+  });
+  const options = baseOptions(state.yearUnit === "cost" ? fmt.cost : fmt.kwh);
+  options.scales.x.stacked = true;
+  options.scales.y.stacked = true;
+  yearChart?.destroy();
+  yearChart = new Chart($("#year-chart"), {
+    type: "bar",
+    data: { labels: monthKeys.map(monthLabel), datasets },
+    options,
+  });
+}
+
+async function renderYear() {
+  const res = await fetch("/api/yearly");
+  yearlyData = res.ok ? await res.json() : { fuels: {} };
+  const hasData = state.fuels.some((fuel) => yearlyData.fuels[fuel]);
+  $("#year-card").hidden = !hasData;
+  if (!hasData) return;
+  renderYearTiles();
+  renderYearChart();
+}
+
 async function renderForecast() {
   const fuel = state.forecastFuel;
   if (!fuel) return;
@@ -215,7 +284,7 @@ async function loadAll() {
   if (summary.sync_error) showBanner("Couldn't reach Octopus — showing cached data.");
   renderTiles(summary);
   renderFuelTabs();
-  await Promise.all([renderHistory(), renderForecast()]);
+  await Promise.all([renderHistory(), renderForecast(), renderYear()]);
 }
 
 function wireControls() {
@@ -231,6 +300,13 @@ function wireControls() {
       state.unit = btn.dataset.unit;
       $("#unit").querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
       renderHistory();
+    })
+  );
+  $("#year-unit").querySelectorAll("button").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      state.yearUnit = btn.dataset.unit;
+      $("#year-unit").querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
+      if (yearlyData) renderYearChart();
     })
   );
   $("#refresh").addEventListener("click", async () => {

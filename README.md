@@ -1,7 +1,8 @@
 # Octopus Usage
 
 A local dashboard for your Octopus Energy (UK) smart meter data: historical
-electricity + gas usage in kWh and estimated £, plus a 30-day forecast.
+electricity + gas usage in kWh and estimated £, yearly totals, plus 30-day
+and 12-month forecasts.
 
 ## Setup
 

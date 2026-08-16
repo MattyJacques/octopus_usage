@@ -7,16 +7,17 @@ from fastapi.testclient import TestClient
 from octopus_usage import db
 from octopus_usage.app import create_app
 from octopus_usage.config import Config
-from tests.fixtures import make_handler
+from tests.fixtures import make_handler, weather_handler
 
 
-def make_test_app(tmp_path, transport=None, seed=None):
+def make_test_app(tmp_path, transport=None, seed=None, weather_transport=None):
     cfg = Config(api_key="sk_test", account_number="A-12345678", db_path=str(tmp_path / "t.db"))
     if seed:
         conn = db.connect(cfg.db_path)
         seed(conn)
         conn.close()
-    return create_app(config=cfg, transport=transport, sync_on_start=False)
+    return create_app(config=cfg, transport=transport, sync_on_start=False,
+                      weather_transport=weather_transport)
 
 
 def seed_days(conn, fuel, end_day, n_days, per_interval=0.5, rate=10.0, sc=48.0):
@@ -204,6 +205,38 @@ def test_monthly_endpoint(tmp_path):
         assert client.get("/api/monthly", params={"fuel": "water", "year": year}).status_code == 422
         assert client.get("/api/monthly", params={"fuel": "electricity", "year": 1999}).status_code == 422
         assert client.get("/api/monthly", params={"fuel": "gas", "year": year}).status_code == 404
+
+
+def test_weather_endpoint_daily_and_hourly(tmp_path):
+    def seed(conn):
+        seed_elec_60_days(conn)
+        db.meta_set(conn, "postcode", "SW1A 1AA")
+
+    app = make_test_app(tmp_path, seed=seed,
+                        weather_transport=httpx.MockTransport(weather_handler()))
+    with TestClient(app) as client:
+        start = (date.today() - timedelta(days=5)).isoformat()
+        end = (date.today() - timedelta(days=1)).isoformat()
+        data = client.get("/api/weather", params={"start": start, "end": end}).json()
+        assert data["available"] is True
+        assert len(data["days"]) == 5
+        assert set(data["days"][0]) == {"date", "tmin", "tmax", "tmean"}
+
+        hourly = client.get("/api/weather", params={"date": end}).json()
+        assert hourly["available"] is True
+        assert len(hourly["hours"]) == 24
+
+        assert client.get("/api/weather").status_code == 422
+        assert client.get("/api/weather", params={"date": "nope"}).status_code == 422
+
+
+def test_weather_endpoint_unavailable_without_postcode(tmp_path):
+    app = make_test_app(tmp_path, seed=seed_elec_60_days,
+                        weather_transport=httpx.MockTransport(weather_handler()))
+    with TestClient(app) as client:
+        data = client.get("/api/weather",
+                          params={"date": date.today().isoformat()}).json()
+        assert data == {"available": False}
 
 
 def test_yearly_endpoint(tmp_path):

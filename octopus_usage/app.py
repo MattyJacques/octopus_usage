@@ -3,11 +3,12 @@ from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from octopus_usage import costs, db, forecast, sync, yearly
+from octopus_usage import costs, db, forecast, sync, weather, yearly
 from octopus_usage.config import Config, ConfigError, load_config
 from octopus_usage.octopus_client import OctopusClient, OctopusError
 
@@ -25,7 +26,8 @@ under <strong>Personal details &rarr; API access</strong>, then restart the app.
 </body></html>"""
 
 
-def create_app(config: Config | None = None, transport=None, sync_on_start: bool = True) -> FastAPI:
+def create_app(config: Config | None = None, transport=None, sync_on_start: bool = True,
+               weather_transport=None) -> FastAPI:
     config_error = None
     if config is None:
         try:
@@ -38,6 +40,7 @@ def create_app(config: Config | None = None, transport=None, sync_on_start: bool
         if config is not None:
             app.state.conn = db.connect(config.db_path)
             app.state.client = OctopusClient(config.api_key, transport=transport)
+            app.state.weather_client = httpx.Client(transport=weather_transport, timeout=30)
             app.state.sync_error = None
             if sync_on_start:
                 try:
@@ -222,6 +225,24 @@ def create_app(config: Config | None = None, transport=None, sync_on_start: bool
                 "totals": yearly.totals(daily, points, today, rate, sc),
             }
         return out
+
+    @app.get("/api/weather")
+    def get_weather(start: str | None = None, end: str | None = None,
+                    date_: str | None = Query(None, alias="date")):
+        guard()
+        conn = app.state.conn
+        wc = app.state.weather_client
+        try:
+            if date_ is not None:
+                hours = weather.hourly_temps(conn, wc, date.fromisoformat(date_))
+                return {"available": True, "hours": hours} if hours else {"available": False}
+            if start is not None and end is not None:
+                days = weather.daily_temps(
+                    conn, wc, date.fromisoformat(start), date.fromisoformat(end))
+                return {"available": True, "days": days} if days is not None else {"available": False}
+        except ValueError:
+            raise HTTPException(status_code=422, detail="dates must be YYYY-MM-DD")
+        raise HTTPException(status_code=422, detail="pass start & end, or date")
 
     @app.post("/api/sync")
     def do_sync():

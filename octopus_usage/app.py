@@ -1,9 +1,9 @@
 """FastAPI app serving the dashboard and JSON API."""
 from contextlib import asynccontextmanager
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -133,6 +133,23 @@ def create_app(config: Config | None = None, transport=None, sync_on_start: bool
                 if d["date"] >= cutoff
             ]
         }
+
+    @app.get("/api/halfhourly")
+    def halfhourly(fuel: str, date_: str | None = Query(None, alias="date")):
+        guard()
+        check_fuel(fuel)
+        conn = app.state.conn
+        if date_ is None:
+            latest = db.latest_interval_start(conn, fuel)
+            if latest is None:
+                raise HTTPException(status_code=404, detail=f"no data for {fuel}")
+            day = datetime.fromisoformat(latest).astimezone(db.LONDON).date()
+        else:
+            try:
+                day = date.fromisoformat(date_)
+            except ValueError:
+                raise HTTPException(status_code=422, detail="date must be YYYY-MM-DD")
+        return {"date": day.isoformat(), "intervals": costs.halfhourly(conn, fuel, day)}
 
     @app.get("/api/forecast")
     def get_forecast(fuel: str):

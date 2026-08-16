@@ -72,6 +72,31 @@ def test_history_endpoint(tmp_path):
         assert client.get("/api/history", params={"fuel": "gas"}).status_code == 404
 
 
+def test_halfhourly_defaults_to_latest_day(tmp_path):
+    app = make_test_app(tmp_path, seed=seed_elec_60_days)
+    with TestClient(app) as client:
+        data = client.get("/api/halfhourly", params={"fuel": "electricity"}).json()
+        assert data["date"] == (date.today() - timedelta(days=1)).isoformat()
+        assert 46 <= len(data["intervals"]) <= 50
+        iv = data["intervals"][0]
+        assert set(iv) == {"start", "kwh", "units", "cost_pence"}
+        assert iv["kwh"] == pytest.approx(0.5)
+        assert iv["cost_pence"] == pytest.approx(0.5 * 10.0)
+
+
+def test_halfhourly_explicit_date_and_errors(tmp_path):
+    app = make_test_app(tmp_path, seed=seed_elec_60_days)
+    with TestClient(app) as client:
+        day = (date.today() - timedelta(days=10)).isoformat()
+        data = client.get("/api/halfhourly", params={"fuel": "electricity", "date": day}).json()
+        assert data["date"] == day
+        assert 46 <= len(data["intervals"]) <= 50
+        assert client.get("/api/halfhourly", params={"fuel": "water"}).status_code == 422
+        assert client.get("/api/halfhourly",
+                          params={"fuel": "electricity", "date": "nope"}).status_code == 422
+        assert client.get("/api/halfhourly", params={"fuel": "gas"}).status_code == 404
+
+
 def test_forecast_endpoint(tmp_path):
     app = make_test_app(tmp_path, seed=seed_elec_60_days)
     with TestClient(app) as client:

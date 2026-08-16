@@ -1,7 +1,7 @@
 """Tariff-rate matching and cost estimation. Money is pence, inc. VAT."""
 from bisect import bisect_right
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, time, timedelta, timezone
 
 from octopus_usage import db
 
@@ -65,6 +65,28 @@ def daily_costs(conn, fuel):
             "units": day["units"],
             "cost_pence": (day["energy"] + sc) if priced else None,
             "complete": day["intervals"] >= 46,
+        })
+    return out
+
+
+def halfhourly(conn, fuel, day):
+    """Half-hourly readings for one Europe/London calendar date, with per-interval cost.
+
+    No standing charge at interval level; cost_pence is None where no rate applies."""
+    rate_rows = db.rates_for(conn, fuel)
+    rate_starts = [r["valid_from"] for r in rate_rows]
+    start = datetime.combine(day, time(0), tzinfo=db.LONDON).astimezone(timezone.utc).isoformat()
+    end = datetime.combine(day + timedelta(days=1), time(0), tzinfo=db.LONDON).astimezone(timezone.utc).isoformat()
+    out = []
+    for r in db.readings(conn, fuel, start=start):
+        if r["interval_start"] >= end:
+            break
+        rate = _lookup(rate_rows, rate_starts, "unit_rate_inc_vat", r["interval_start"])
+        out.append({
+            "start": r["interval_start"],
+            "kwh": r["consumption_kwh"],
+            "units": r["consumption"],
+            "cost_pence": r["consumption_kwh"] * rate if rate is not None else None,
         })
     return out
 

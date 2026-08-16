@@ -35,3 +35,48 @@ def test_coords_none_on_geocode_failure_and_not_cached(conn):
     assert weather.coords(conn, make_client(weather_handler(fail_geocode=True))) is None
     # failure is not cached: a later working call succeeds
     assert weather.coords(conn, make_client(weather_handler())) == (51.501, -0.142)
+
+
+def seed_location(conn):
+    db.meta_set(conn, "weather_lat", "51.501")
+    db.meta_set(conn, "weather_lon", "-0.142")
+
+
+def test_daily_temps_fetches_and_caches(conn):
+    seed_location(conn)
+    calls = []
+    client = make_client(weather_handler(calls))
+    start, end = date(2026, 6, 1), date(2026, 6, 5)
+    rows = weather.daily_temps(conn, client, start, end)
+    assert [r["date"] for r in rows] == [(start + timedelta(days=i)).isoformat() for i in range(5)]
+    assert rows[0]["tmin"] == 10.0
+    assert rows[0]["tmax"] == 20.0
+    assert rows[0]["tmean"] == 15.0
+    n = len(calls)
+    assert weather.daily_temps(conn, client, start, end) == rows
+    assert len(calls) == n  # cache hit, no further HTTP
+
+
+def test_daily_temps_fetches_only_missing_dates(conn):
+    seed_location(conn)
+    calls = []
+    client = make_client(weather_handler(calls))
+    weather.daily_temps(conn, client, date(2026, 6, 1), date(2026, 6, 5))
+    weather.daily_temps(conn, client, date(2026, 6, 1), date(2026, 6, 10))
+    assert "start_date=2026-06-06" in calls[-1]
+
+
+def test_daily_temps_uses_forecast_api_for_recent_days(conn):
+    seed_location(conn)
+    calls = []
+    client = make_client(weather_handler(calls))
+    rows = weather.daily_temps(conn, client,
+                               date.today() - timedelta(days=3),
+                               date.today() - timedelta(days=1))
+    assert len(rows) == 3
+    assert all("api.open-meteo.com" in c for c in calls)
+
+
+def test_daily_temps_none_without_location(conn):
+    client = make_client(weather_handler())
+    assert weather.daily_temps(conn, client, date(2026, 6, 1), date(2026, 6, 2)) is None

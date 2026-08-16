@@ -40,6 +40,12 @@ CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS weather_daily (
+  date TEXT PRIMARY KEY,
+  tmin REAL NOT NULL,
+  tmax REAL NOT NULL,
+  tmean REAL NOT NULL
+);
 """
 
 
@@ -178,6 +184,24 @@ def rates_for(conn, fuel):
 def standing_charges_for(conn, fuel):
     return conn.execute(
         "SELECT * FROM standing_charges WHERE fuel=? ORDER BY valid_from", (fuel,)
+    ).fetchall()
+
+
+def upsert_weather_daily(conn, rows):
+    with conn:
+        conn.executemany(
+            "INSERT INTO weather_daily (date, tmin, tmax, tmean) VALUES (?, ?, ?, ?)"
+            " ON CONFLICT(date) DO UPDATE SET"
+            " tmin=excluded.tmin, tmax=excluded.tmax, tmean=excluded.tmean",
+            [(r["date"], r["tmin"], r["tmax"], r["tmean"]) for r in rows],
+        )
+
+
+def weather_daily_range(conn, start, end):
+    """Cached daily temperatures with start <= date <= end (ISO date strings)."""
+    return conn.execute(
+        "SELECT * FROM weather_daily WHERE date>=? AND date<=? ORDER BY date",
+        (start, end),
     ).fetchall()
 
 

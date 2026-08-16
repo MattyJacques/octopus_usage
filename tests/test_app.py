@@ -60,6 +60,20 @@ def test_summary_tiles(tmp_path):
         assert data["sync_error"] is None
 
 
+def test_summary_meters_first_data_and_charges(tmp_path):
+    def seed(conn):
+        seed_elec_60_days(conn)
+        db.meta_set(conn, "electricity_serial", "20E5138188")
+
+    app = make_test_app(tmp_path, seed=seed)
+    with TestClient(app) as client:
+        data = client.get("/api/summary").json()
+        assert data["meters"] == {"electricity": "20E5138188", "gas": None}
+        assert data["first_data"] == (date.today() - timedelta(days=60)).isoformat()
+        assert data["gas_m3_to_kwh"] == pytest.approx(11.22, rel=0.01)
+        assert data["fuels"]["electricity"]["standing_charge"] == pytest.approx(48.0)
+
+
 def test_history_endpoint(tmp_path):
     app = make_test_app(tmp_path, seed=seed_elec_60_days)
     with TestClient(app) as client:

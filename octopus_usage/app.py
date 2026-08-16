@@ -75,9 +75,19 @@ def create_app(config: Config | None = None, transport=None, sync_on_start: bool
         guard()
         conn = app.state.conn
         today = date.today()
+        earliest = [
+            e for e in (db.earliest_interval_start(conn, f) for f in db.FUELS)
+            if e is not None
+        ]
         out = {
             "last_sync": db.meta_get(conn, "last_sync"),
             "sync_error": app.state.sync_error,
+            "meters": {f: db.meta_get(conn, f"{f}_serial") for f in db.FUELS},
+            "first_data": (
+                datetime.fromisoformat(min(earliest)).astimezone(db.LONDON).date().isoformat()
+                if earliest else None
+            ),
+            "gas_m3_to_kwh": costs.M3_TO_KWH,
             "fuels": {},
         }
         for fuel in db.FUELS:
@@ -103,6 +113,7 @@ def create_app(config: Config | None = None, transport=None, sync_on_start: bool
                 else None
             )
             out["fuels"][fuel] = {
+                "standing_charge": sc,
                 "yesterday": window(1),
                 "last_7": window(7),
                 "last_30": window(30),

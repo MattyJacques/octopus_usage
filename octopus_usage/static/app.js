@@ -38,6 +38,11 @@ function money(pence) {
   return '£' + v.toLocaleString('en-GB', { minimumFractionDigits: dp, maximumFractionDigits: dp });
 }
 
+function money0(pence) {
+  if (pence == null) return '—';
+  return '£' + Math.round(pence / 100).toLocaleString('en-GB');
+}
+
 function fmtNum(v) {
   return v.toLocaleString('en-GB', { maximumFractionDigits: v < 20 ? 1 : 0 });
 }
@@ -107,7 +112,11 @@ async function buildPeriod(fuel) {
   const days = hist ? hist.days : [];
 
   if (state.preset === 'yesterday') {
-    const hh = await api(`/api/halfhourly?fuel=${fuel}`);
+    // Smart-meter data lags and the newest day is usually partial: show the
+    // latest complete day instead, labelled with its actual date.
+    const target = [...days].reverse().find(d => d.complete) || days[days.length - 1];
+    if (!target) return null;
+    const hh = await api(`/api/halfhourly?fuel=${fuel}&date=${target.date}`);
     if (!hh || !hh.intervals.length) return null;
     const idx = days.findIndex(d => d.date === hh.date);
     const dayRow = idx >= 0 ? days[idx] : null;
@@ -128,9 +137,10 @@ async function buildPeriod(fuel) {
   }
 
   if (state.preset === '7d') {
-    if (!days.length) return null;
-    const sel = days.slice(-7);
-    const prev = days.slice(-14, -7);
+    const whole = days.filter(d => d.complete);
+    if (!whole.length) return null;
+    const sel = whole.slice(-7);
+    const prev = whole.slice(-14, -7);
     return {
       bars: sel.map(d => ({ v: val(d), ghost: 0, label: weekdayAbbr(d.date) })),
       gap: 8,
@@ -175,14 +185,20 @@ async function buildPeriod(fuel) {
   if (!cur || !cur.months.length) return null;
   const prevByM = new Map((prev ? prev.months : []).map(m => [m.month.slice(5), m]));
   const nowYm = londonToday().slice(0, 7);
-  const bars = cur.months.map(m => {
-    const ghost = prevByM.get(m.month.slice(5));
-    return {
-      v: gas ? m.units : m.kwh,
+  // Keep one slot per month across the data range so gaps (e.g. a meter
+  // comms outage) show as empty months rather than silently closing up.
+  const nums = cur.months.map(m => parseInt(m.month.slice(5), 10));
+  const byNum = new Map(cur.months.map(m => [parseInt(m.month.slice(5), 10), m]));
+  const bars = [];
+  for (let n = Math.min(...nums); n <= Math.max(...nums); n++) {
+    const m = byNum.get(n);
+    const ghost = prevByM.get(String(n).padStart(2, '0'));
+    bars.push({
+      v: m ? (gas ? m.units : m.kwh) : 0,
       ghost: ghost ? (gas ? ghost.units : ghost.kwh) : 0,
-      label: MONTH_ABBR[parseInt(m.month.slice(5), 10) - 1],
-    };
-  });
+      label: MONTH_ABBR[n - 1],
+    });
+  }
   const prevAligned = cur.months.map(m => prevByM.get(m.month.slice(5))).filter(Boolean);
   return {
     bars, gap: 10,
@@ -314,9 +330,15 @@ async function renderUsage(summary) {
   const peak = peakSlot(heat);
   if (peak) notable.push(['Peak slot', peak]);
   if (state.preset === 'year') {
-    const monthCosts = active.flatMap(f => (per[f].months || []))
-      .reduce((m, b) => m.set(b.month, (m.get(b.month) || 0) + (b.cost_pence ?? NaN)), new Map());
-    const priced = [...monthCosts.entries()].filter(([, c]) => !Number.isNaN(c));
+    // A month only qualifies when every active fuel has priced data for it —
+    // a fuel's outage month would otherwise look artificially cheap.
+    const nowYm = londonToday().slice(0, 7);
+    const costByFuel = active.map(f => new Map((per[f].months || []).map(b => [b.month, b.cost_pence])));
+    const priced = [...new Set(costByFuel.flatMap(m => [...m.keys()]))]
+      .filter(k => k !== nowYm)
+      .map(k => [k, costByFuel.map(m => m.get(k))])
+      .filter(([, vals]) => vals.every(v => v != null))
+      .map(([k, vals]) => [k, vals.reduce((a, b) => a + b, 0)]);
     if (priced.length) {
       const min = priced.reduce((a, b) => (b[1] < a[1] ? b : a));
       notable.push(['Cheapest month', `${monthShort(min[0])} · ${money(min[1])}`]);
@@ -325,7 +347,7 @@ async function renderUsage(summary) {
     const byDate = new Map();
     for (const f of active) {
       for (const d of per[f].days) {
-        if (d.cost_pence == null) continue;
+        if (d.cost_pence == null || !d.complete) continue;
         byDate.set(d.date, (byDate.get(d.date) || 0) + d.cost_pence);
       }
     }
@@ -363,7 +385,9 @@ function buildFcSeries(months, todayYm) {
   }
   const keys = [...map.keys()].sort();
   const actualKeys = keys.filter(k => map.get(k).hasActual && k <= todayYm).slice(-6);
-  const futureKeys = keys.filter(k => k > todayYm).slice(0, 12);
+  // The 365-day forecast horizon ends mid-month, so the last bucket is a
+  // partial month — drop it rather than chart/tabulate a misleading dip.
+  const futureKeys = keys.filter(k => k > todayYm).slice(0, -1).slice(0, 12);
   const pts = actualKeys.map(k => ({ k, v: map.get(k).actualKwh + map.get(k).fcKwh }))
     .concat(futureKeys.map(k => ({ k, v: map.get(k).fcKwh })));
   return { pts, splitIdx: actualKeys.length - 1, futureKeys, map };
@@ -437,9 +461,9 @@ async function renderForecast(summary) {
       <span class="fc-c-month">${monthShort(k)}</span>
       <span class="fc-c-kwh">${elec ? fmtNum(Math.round(elec.fcKwh)) : '—'}</span>
       <span class="fc-c-m3">${gas ? fmtNum(Math.round(gas.fcKwh / factor)) : '—'}</span>
-      <span class="fc-c-low">${mid == null ? '—' : money(mid * 0.86)}</span>
-      <span class="fc-c-mid">${mid == null ? '—' : money(mid)}</span>
-      <span class="fc-c-high">${mid == null ? '—' : money(mid * 1.19)}</span>
+      <span class="fc-c-low">${money0(mid == null ? null : mid * 0.86)}</span>
+      <span class="fc-c-mid">${money0(mid)}</span>
+      <span class="fc-c-high">${money0(mid == null ? null : mid * 1.19)}</span>
     </div>`;
   }).join('');
 

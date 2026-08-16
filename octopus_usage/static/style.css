@@ -158,6 +158,7 @@ button:disabled { cursor: default; }
 
 /* ---- Screens ---- */
 .screen { display: flex; align-items: stretch; flex: 1; min-height: 0; }
+.screen[hidden] { display: none; }
 .charts {
   flex: 1; min-width: 0; padding: 22px 22px 26px;
   display: flex; flex-direction: column; gap: 16px;

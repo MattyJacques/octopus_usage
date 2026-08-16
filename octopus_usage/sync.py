@@ -127,7 +127,12 @@ def sync_fuel_rates(conn, client, fuel, meter):
 
 def full_sync(conn, client, account_number, now=None):
     """Discover meters, then sync readings and rates for each fuel."""
-    meters = discover_meters(client.account(account_number))
+    account_data = client.account(account_number)
+    meters = discover_meters(account_data)
+    for prop in account_data.get("properties", []):
+        if prop.get("postcode"):
+            db.meta_set(conn, "postcode", prop["postcode"])
+            break
     now = now or datetime.now(timezone.utc)
     result = {"synced_at": now.isoformat(), "fuels": {}}
     for fuel, meter in meters.items():

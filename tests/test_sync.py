@@ -158,3 +158,8 @@ def test_gas_unit_decision_is_sticky(conn):
     assert db.meta_get(conn, "gas_unit") == "kwh"
     sync.sync_fuel_readings(conn, make_client(make_handler(gas_values=(0.1,) * 4)), "gas", meters["gas"])
     assert db.meta_get(conn, "gas_unit") == "kwh"
+
+
+def test_full_sync_stores_postcode(conn):
+    sync.full_sync(conn, make_client(make_handler()), "A-12345678")
+    assert db.meta_get(conn, "postcode") == "SW1A 1AA"

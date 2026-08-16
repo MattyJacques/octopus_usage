@@ -7,6 +7,7 @@ ACCOUNT = {
     "number": "A-12345678",
     "properties": [
         {
+            "postcode": "SW1A 1AA",
             "electricity_meter_points": [
                 {
                     "mpan": "1200000000000",

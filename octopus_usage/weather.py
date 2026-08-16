@@ -81,3 +81,27 @@ def daily_temps(conn, client, start, end):
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError):
             return None
     return [dict(r) for r in db.weather_daily_range(conn, start.isoformat(), end.isoformat())]
+
+
+def hourly_temps(conn, client, day):
+    """24 hourly temperatures for one London date; None when unavailable.
+
+    Not cached: one small request per view, and only the yesterday preset
+    uses it. The forecast API's past window covers ~3 months; older dates
+    come from the archive API."""
+    loc = coords(conn, client)
+    if loc is None:
+        return None
+    lat, lon = loc
+    url = FORECAST_URL if day >= date.today() - timedelta(days=90) else ARCHIVE_URL
+    try:
+        resp = client.get(url, params={
+            "latitude": lat, "longitude": lon,
+            "start_date": day.isoformat(), "end_date": day.isoformat(),
+            "hourly": "temperature_2m",
+            "timezone": "Europe/London",
+        })
+        resp.raise_for_status()
+        return resp.json()["hourly"]["temperature_2m"]
+    except (httpx.HTTPError, KeyError, TypeError, ValueError):
+        return None

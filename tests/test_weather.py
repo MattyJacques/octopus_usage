@@ -80,3 +80,25 @@ def test_daily_temps_uses_forecast_api_for_recent_days(conn):
 def test_daily_temps_none_without_location(conn):
     client = make_client(weather_handler())
     assert weather.daily_temps(conn, client, date(2026, 6, 1), date(2026, 6, 2)) is None
+
+
+def test_hourly_temps_returns_24_values(conn):
+    seed_location(conn)
+    client = make_client(weather_handler())
+    temps = weather.hourly_temps(conn, client, date.today() - timedelta(days=1))
+    assert len(temps) == 24
+    assert temps[0] == 12.0
+
+
+def test_hourly_temps_picks_api_by_age(conn):
+    seed_location(conn)
+    calls = []
+    client = make_client(weather_handler(calls))
+    weather.hourly_temps(conn, client, date.today() - timedelta(days=1))
+    weather.hourly_temps(conn, client, date(2020, 1, 1))
+    assert "api.open-meteo.com" in calls[0]
+    assert "archive-api.open-meteo.com" in calls[1]
+
+
+def test_hourly_temps_none_without_location(conn):
+    assert weather.hourly_temps(conn, make_client(weather_handler()), date(2026, 6, 1)) is None

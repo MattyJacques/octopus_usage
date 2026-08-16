@@ -163,6 +163,18 @@ def test_setup_page_when_unconfigured(tmp_path, monkeypatch):
         assert client.get("/api/summary").status_code == 503
 
 
+def test_heatmap_endpoint(tmp_path):
+    app = make_test_app(tmp_path, seed=seed_elec_60_days)
+    with TestClient(app) as client:
+        data = client.get("/api/heatmap", params={"fuel": "electricity"}).json()
+        assert data["weeks"] == 12
+        assert len(data["rows"]) == 7
+        assert data["rows"][0]["day"] == "Mon"
+        assert all(len(r["cells"]) == 24 for r in data["rows"])
+        assert client.get("/api/heatmap", params={"fuel": "water"}).status_code == 422
+        assert client.get("/api/heatmap", params={"fuel": "gas"}).status_code == 404
+
+
 def test_monthly_endpoint(tmp_path):
     app = make_test_app(tmp_path, seed=seed_elec_60_days)
     with TestClient(app) as client:

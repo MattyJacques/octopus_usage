@@ -173,6 +173,15 @@ def create_app(config: Config | None = None, transport=None, sync_on_start: bool
             })
         return {"points": points}
 
+    @app.get("/api/heatmap")
+    def heatmap(fuel: str):
+        guard()
+        check_fuel(fuel)
+        rows = db.hourly_profile(app.state.conn, fuel, weeks=12)
+        if not rows:
+            raise HTTPException(status_code=404, detail=f"no data for {fuel}")
+        return {"weeks": 12, "rows": rows}
+
     @app.get("/api/monthly")
     def monthly(fuel: str, year: int):
         guard()

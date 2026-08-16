@@ -4,10 +4,11 @@ All timestamps are stored as UTC ISO-8601 strings with a +00:00 offset
 (see to_utc_iso), so lexicographic comparison equals chronological order.
 """
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 FUELS = ("electricity", "gas")
+DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 LONDON = ZoneInfo("Europe/London")
 
 SCHEMA = """
@@ -117,6 +118,29 @@ def daily_totals(conn, fuel):
         day["complete"] = day["intervals"] >= 46
         out.append(day)
     return out
+
+
+def hourly_profile(conn, fuel, weeks=12):
+    """Mean kWh by (weekday, London hour) over the trailing `weeks` ending at the newest reading."""
+    latest = latest_interval_start(conn, fuel)
+    if latest is None:
+        return []
+    end = datetime.fromisoformat(latest).astimezone(LONDON).date()
+    start = end - timedelta(days=weeks * 7 - 1)
+    sums = {}
+    dates_by_wd = {wd: set() for wd in range(7)}
+    for r in readings(conn, fuel):
+        dt = datetime.fromisoformat(r["interval_start"]).astimezone(LONDON)
+        if not start <= dt.date() <= end:
+            continue
+        wd = dt.weekday()
+        sums[(wd, dt.hour)] = sums.get((wd, dt.hour), 0.0) + r["consumption_kwh"]
+        dates_by_wd[wd].add(dt.date())
+    return [
+        {"day": DAY_NAMES[wd],
+         "cells": [sums.get((wd, h), 0.0) / max(1, len(dates_by_wd[wd])) for h in range(24)]}
+        for wd in range(7)
+    ]
 
 
 def _upsert_tariff_rows(conn, table, value_column, fuel, tariff_code, rows) -> int:

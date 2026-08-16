@@ -85,3 +85,18 @@ def test_meta_roundtrip(conn):
     db.meta_set(conn, "x", "1")
     db.meta_set(conn, "x", "2")
     assert db.meta_get(conn, "x") == "2"
+
+
+def test_hourly_profile_mean_kwh_by_weekday_hour(conn):
+    for i in range(14):  # 2026-01-01..14: winter, so London == UTC
+        db.upsert_readings(conn, "electricity", rows_for_day(f"2026-01-{i + 1:02d}"))
+    profile = db.hourly_profile(conn, "electricity")
+    assert [r["day"] for r in profile] == ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    for row in profile:
+        assert len(row["cells"]) == 24
+        for cell in row["cells"]:
+            assert cell == pytest.approx(1.0)  # two 0.5 kWh half-hours per hour
+
+
+def test_hourly_profile_empty_without_readings(conn):
+    assert db.hourly_profile(conn, "gas") == []

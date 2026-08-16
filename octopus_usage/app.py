@@ -125,6 +125,7 @@ def create_app(config: Config | None = None, transport=None, sync_on_start: bool
                 {
                     "date": d["date"].isoformat(),
                     "kwh": d["kwh"],
+                    "units": d["units"],
                     "cost_pence": d["cost_pence"],
                     "complete": d["complete"],
                 }

@@ -66,7 +66,7 @@ def test_history_endpoint(tmp_path):
         data = client.get("/api/history", params={"fuel": "electricity", "days": 7}).json()
         assert len(data["days"]) == 7
         d = data["days"][-1]
-        assert set(d) == {"date", "kwh", "cost_pence", "complete"}
+        assert set(d) == {"date", "kwh", "units", "cost_pence", "complete"}
         assert d["date"] == (date.today() - timedelta(days=1)).isoformat()
         assert client.get("/api/history", params={"fuel": "water"}).status_code == 422
         assert client.get("/api/history", params={"fuel": "gas"}).status_code == 404

@@ -44,8 +44,9 @@ def daily_costs(conn, fuel):
     days = {}
     for r in db.readings(conn, fuel):
         d = datetime.fromisoformat(r["interval_start"]).astimezone(db.LONDON).date()
-        day = days.setdefault(d, {"kwh": 0.0, "energy": 0.0, "priced": True, "intervals": 0})
+        day = days.setdefault(d, {"kwh": 0.0, "units": 0.0, "energy": 0.0, "priced": True, "intervals": 0})
         day["kwh"] += r["consumption_kwh"]
+        day["units"] += r["consumption"]
         day["intervals"] += 1
         rate = _lookup(rate_rows, rate_starts, "unit_rate_inc_vat", r["interval_start"])
         if rate is None:
@@ -61,6 +62,7 @@ def daily_costs(conn, fuel):
         out.append({
             "date": d,
             "kwh": day["kwh"],
+            "units": day["units"],
             "cost_pence": (day["energy"] + sc) if priced else None,
             "complete": day["intervals"] >= 46,
         })

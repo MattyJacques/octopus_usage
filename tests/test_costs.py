@@ -63,6 +63,19 @@ def test_daily_costs_time_of_use(conn):
     assert daily[0]["cost_pence"] == pytest.approx(12 * 10.0 + 12 * 20.0 + 50.0)
 
 
+def test_daily_costs_reports_raw_units(conn):
+    # Gas meters report m3 in `consumption` with kWh in `consumption_kwh`.
+    rows = rows_for_day("2026-01-15")
+    for r in rows:
+        r["consumption"] = 0.1
+        r["consumption_kwh"] = 1.122
+    db.upsert_readings(conn, "gas", rows)
+    flat_rate(conn, "gas", 7.0)
+    daily = costs.daily_costs(conn, "gas")
+    assert daily[0]["units"] == pytest.approx(48 * 0.1)
+    assert daily[0]["kwh"] == pytest.approx(48 * 1.122)
+
+
 def test_daily_costs_none_when_rates_missing(conn):
     db.upsert_readings(conn, "electricity", rows_for_day("2025-12-01"))
     flat_rate(conn, "electricity", 28.0, valid_from="2026-01-01T00:00:00Z")

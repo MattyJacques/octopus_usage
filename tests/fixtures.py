@@ -74,3 +74,39 @@ def make_handler(elec_values=(1.0,) * 96, gas_values=(0.1,) * 96):
         return httpx.Response(404, json={"detail": "not found"})
 
     return handler
+
+
+def weather_handler(calls=None, fail_geocode=False):
+    """postcodes.io + open-meteo endpoints for MockTransport.
+
+    Daily responses echo the requested date range with flat 10/20/15 degree
+    min/max/mean; hourly responses return 24 values. Request URLs are appended
+    to `calls` when given, so tests can assert on caching behaviour."""
+    def handler(request):
+        if calls is not None:
+            calls.append(str(request.url))
+        host = request.url.host
+        if host == "api.postcodes.io":
+            if fail_geocode:
+                return httpx.Response(500)
+            return httpx.Response(
+                200, json={"status": 200, "result": {"latitude": 51.501, "longitude": -0.142}})
+        if host in ("archive-api.open-meteo.com", "api.open-meteo.com"):
+            params = dict(request.url.params)
+            if "hourly" in params:
+                return httpx.Response(200, json={
+                    "hourly": {"temperature_2m": [12.0 + h * 0.25 for h in range(24)]}})
+            from datetime import date as date_cls
+            start = date_cls.fromisoformat(params["start_date"])
+            end = date_cls.fromisoformat(params["end_date"])
+            days = [(start + timedelta(days=i)).isoformat()
+                    for i in range((end - start).days + 1)]
+            return httpx.Response(200, json={"daily": {
+                "time": days,
+                "temperature_2m_min": [10.0] * len(days),
+                "temperature_2m_max": [20.0] * len(days),
+                "temperature_2m_mean": [15.0] * len(days),
+            }})
+        return httpx.Response(404)
+
+    return handler

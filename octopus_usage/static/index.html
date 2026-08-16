@@ -3,67 +3,51 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Octopus Usage</title>
+<title>Meterline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/style.css">
 </head>
-<body class="viz-root">
-<main>
-  <header>
-    <h1>Energy usage</h1>
-    <div class="sync">
-      <span id="last-sync" class="muted"></span>
-      <button id="refresh">Refresh</button>
+<body>
+<div class="page">
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-mark"></span><span class="brand-name">Meterline</span></div>
+    <nav class="nav" id="nav"></nav>
+    <div class="fuels-card">
+      <span class="mono-label">Fuels</span>
+      <div id="fuel-chips" class="fuel-chips"></div>
     </div>
-  </header>
-  <div id="banner" class="banner" hidden></div>
-
-  <section id="tiles"></section>
-
-  <section class="card">
-    <div class="controls">
-      <h2>History</h2>
-      <div class="btn-group" id="period" role="group" aria-label="Period">
-        <button data-days="7">7d</button>
-        <button data-days="30" class="active">30d</button>
-        <button data-days="90">90d</button>
-        <button data-days="365">1y</button>
+    <div class="side-foot">
+      <div id="meter-lines" class="meter-lines"></div>
+      <button id="sync-now" class="sync-btn" type="button">Sync now</button>
+    </div>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <div class="segmented" id="presets"></div>
+      <div class="year-nav">
+        <span class="mono-label">Calendar year</span>
+        <div class="year-stepper">
+          <button id="prev-year" type="button">&lsaquo;</button>
+          <span id="year-label"></span>
+          <button id="next-year" type="button">&rsaquo;</button>
+        </div>
       </div>
-      <div class="btn-group" id="unit" role="group" aria-label="Unit">
-        <button data-unit="kwh" class="active">kWh</button>
-        <button data-unit="cost">&pound;</button>
-      </div>
+    </header>
+    <div id="banner" class="banner" hidden></div>
+    <div class="screen" id="screen-usage">
+      <div class="charts" id="usage-charts"></div>
+      <aside class="rail" id="usage-rail"></aside>
     </div>
-    <div class="chart"><canvas id="history-chart"></canvas></div>
-  </section>
-
-  <section class="card" id="year-card" hidden>
-    <div class="controls">
-      <h2>Year</h2>
-      <div class="btn-group" id="year-unit" role="group" aria-label="Unit">
-        <button data-unit="kwh" class="active">kWh</button>
-        <button data-unit="cost">&pound;</button>
-      </div>
+    <div class="screen" id="screen-forecast" hidden>
+      <div class="charts" id="forecast-charts"></div>
+      <aside class="rail" id="forecast-rail"></aside>
     </div>
-    <div id="year-tiles"></div>
-    <div class="chart"><canvas id="year-chart"></canvas></div>
-    <p class="muted">Shaded bars are forecast. Projections assume today's tariff.</p>
-  </section>
-
-  <section class="card">
-    <div class="controls">
-      <h2>Next 30 days</h2>
-      <div class="btn-group" id="forecast-fuel" role="group" aria-label="Fuel"></div>
-    </div>
-    <div class="chart"><canvas id="forecast-chart"></canvas></div>
-    <p class="muted">Forecast from your seasonal and weekday usage patterns; the shaded area is the likely range.</p>
-  </section>
-
-  <footer class="muted">
-    Costs are estimates including VAT &mdash; your bill may differ slightly.
-    Smart meter data usually lags about a day.
-  </footer>
-</main>
-<script src="/static/chart.umd.js"></script>
+  </div>
+</div>
+</div>
 <script src="/static/app.js"></script>
 </body>
 </html>

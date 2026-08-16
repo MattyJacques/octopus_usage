@@ -150,9 +150,10 @@ def test_index_serves_dashboard_when_configured(tmp_path):
     with TestClient(app) as client:
         page = client.get("/")
         assert page.status_code == 200
-        assert "history-chart" in page.text
-        assert "year-chart" in page.text
-        assert client.get("/static/chart.umd.js").status_code == 200
+        assert "Meterline" in page.text
+        assert "screen-usage" in page.text
+        assert "screen-forecast" in page.text
+        assert client.get("/static/app.js").status_code == 200
 
 
 def test_responses_forbid_stale_caching(tmp_path):

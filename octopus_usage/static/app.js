@@ -5,6 +5,7 @@ const FUEL_META = {
   gas: { name: 'Gas', unit: 'm³', color: 'oklch(0.78 0.14 75)', soft: 'oklch(0.78 0.14 75 / 0.16)' },
 };
 const FUEL_KEYS = ['electricity', 'gas'];
+const TEMP_COLOR = 'oklch(0.78 0.09 25)';
 const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const PRESETS = [
   ['yesterday', 'Yesterday'], ['7d', 'Last 7 days'], ['month', 'This month'], ['year', 'Calendar year'],
@@ -216,7 +217,7 @@ async function buildPeriod(fuel) {
 
 /* ---------- shared chart pieces ---------- */
 
-function barsHTML(bars, color, gapPx) {
+function barsHTML(bars, color, gapPx, overlay) {
   const max = Math.max(...bars.map(b => Math.max(b.v, b.ghost || 0)), 0) * 1.08 || 1;
   const slots = bars.map(b => {
     const h = (Math.max(0, b.v) / max * 100).toFixed(1);
@@ -226,18 +227,109 @@ function barsHTML(bars, color, gapPx) {
       + `<div class="bar-fill" style="height:${h}%;background:${color}"></div></div>`;
   }).join('');
   const labels = bars.map(b => `<span>${b.label || ''}</span>`).join('');
-  return `<div class="bars" style="gap:${gapPx}px">${slots}</div>`
+  return `<div class="bars" style="gap:${gapPx}px">${slots}${overlay || ''}</div>`
     + `<div class="bar-labels" style="gap:${gapPx}px">${labels}</div>`;
 }
 
-function usageCardHTML(fuel, p) {
+/* ---------- weather ---------- */
+
+async function fetchWeather(per, active) {
+  if (!active.length) return null;
+  const p = per[active[0]];
+  if (state.preset === 'yesterday') {
+    const d = p.days[0] && p.days[0].date;
+    if (!d) return null;
+    const w = await api(`/api/weather?date=${d}`);
+    return w && w.available ? { hours: w.hours } : null;
+  }
+  let start, end;
+  if (state.preset === 'year') {
+    start = `${state.year}-01-01`;
+    end = `${state.year}-12-31`;
+  } else {
+    if (!p.days.length) return null;
+    start = p.days[0].date;
+    end = p.days[p.days.length - 1].date;
+  }
+  const w = await api(`/api/weather?start=${start}&end=${end}`);
+  return w && w.available && w.days.length ? { days: w.days } : null;
+}
+
+function weatherSeries(w) {
+  if (!w) return null;
+  if (w.hours) {
+    const vals = w.hours.filter(v => v != null);
+    if (!vals.length) return null;
+    return {
+      pts: w.hours,
+      lo: Math.min(...vals), hi: Math.max(...vals),
+      mean: vals.reduce((a, b) => a + b, 0) / vals.length,
+    };
+  }
+  let pts;
+  if (state.preset === 'year') {
+    const byM = new Map();
+    for (const d of w.days) {
+      const e = byM.get(d.date.slice(0, 7)) || { s: 0, n: 0 };
+      e.s += d.tmean;
+      e.n += 1;
+      byM.set(d.date.slice(0, 7), e);
+    }
+    pts = [...byM.keys()].sort().map(k => byM.get(k).s / byM.get(k).n);
+  } else {
+    pts = w.days.map(d => d.tmean);
+  }
+  const means = w.days.map(d => d.tmean);
+  return {
+    pts,
+    lo: Math.min(...w.days.map(d => d.tmin)), hi: Math.max(...w.days.map(d => d.tmax)),
+    mean: means.reduce((a, b) => a + b, 0) / means.length,
+  };
+}
+
+function tempPolyline(pts) {
+  const vals = pts.filter(v => v != null);
+  if (vals.length < 2) return '';
+  const lo = Math.min(...vals);
+  const span = Math.max(1e-6, Math.max(...vals) - lo);
+  return pts.map((v, i) => (v == null ? null
+    : `${(i / (pts.length - 1) * 1000).toFixed(1)},${(176 - (v - lo) / span * 128).toFixed(1)}`))
+    .filter(Boolean).join(' ');
+}
+
+function tempOverlaySVG(ws) {
+  const points = ws && tempPolyline(ws.pts);
+  if (!points) return '';
+  return `<svg viewBox="0 0 1000 200" preserveAspectRatio="none"
+      style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none">
+    <polyline points="${points}" fill="none" stroke="${TEMP_COLOR}" stroke-width="1.75"
+      vector-effect="non-scaling-stroke" stroke-linejoin="round"></polyline></svg>`;
+}
+
+function weatherCardHTML(ws, label) {
+  const points = ws && tempPolyline(ws.pts);
+  if (!points) return '';
+  return `<div class="rail-card"><span class="mono-label">Weather</span>
+    <div class="weather-mean">
+      <span class="big">${ws.mean.toFixed(1)}°C</span>
+      <span class="sub">${ws.lo.toFixed(1)}° – ${ws.hi.toFixed(1)}° over ${label}</span>
+    </div>
+    <svg viewBox="0 0 1000 200" preserveAspectRatio="none" style="width:100%;height:52px;display:block">
+      <polyline points="${points}" fill="none" stroke="${TEMP_COLOR}" stroke-width="1.75"
+        vector-effect="non-scaling-stroke" stroke-linejoin="round"></polyline>
+    </svg>
+    <span class="weather-note">Gas tracks temperature closely; electricity barely moves with it.</span>
+  </div>`;
+}
+
+function usageCardHTML(fuel, p, overlay) {
   const f = FUEL_META[fuel];
   const totals = p && p.bars.length
     ? `<div class="chart-totals"><span class="units" style="color:${f.color}">${fmtUnits(p.units, f.unit)}</span>`
       + `<span class="cost">${money(p.cost)}</span></div>`
     : '';
   const body = p && p.bars.length
-    ? barsHTML(p.bars, f.color, p.gap)
+    ? barsHTML(p.bars, f.color, p.gap, overlay)
     : '<div class="empty-note">No data yet</div>';
   return `<div class="chart-card">
     <div class="chart-head">
@@ -300,10 +392,12 @@ async function renderUsage(summary) {
   }));
   const heat = summary.fuels[state.heatFuel] ? await api(`/api/heatmap?fuel=${state.heatFuel}`) : null;
   const active = FUEL_KEYS.filter(f => per[f]);
+  const ws = weatherSeries(await fetchWeather(per, active));
 
   const charts = document.getElementById('usage-charts');
   charts.innerHTML = FUEL_KEYS.filter(f => state.on[f])
-    .map(f => usageCardHTML(f, per[f])).join('') + heatmapHTML(heat);
+    .map(f => usageCardHTML(f, per[f], f === 'electricity' ? tempOverlaySVG(ws) : ''))
+    .join('') + heatmapHTML(heat);
 
   const label = active.length ? per[active[0]].label
     : { yesterday: 'yesterday', '7d': 'last 7 days', month: monthFull(londonToday().slice(0, 7)), year: String(state.year) }[state.preset];
@@ -370,6 +464,7 @@ async function renderUsage(summary) {
       ${deltaHTML}
     </div>
     <div class="split-card">${splitRows}</div>
+    ${weatherCardHTML(ws, label)}
     <div class="rail-card"><span class="mono-label">Notable</span>${notableHTML}</div>`;
 }
 

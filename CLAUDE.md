@@ -22,11 +22,12 @@ Setup (once): `python3 -m venv .venv` (Python 3.11+) then `.venv/bin/pip install
 
 Data flow: Octopus API → `octopus_client` → `sync` → SQLite (`db`) → `costs` → `forecast`/`yearly` → JSON endpoints in `app` → static frontend.
 
-- `app.py` — `create_app()` factory (used with uvicorn `--factory`). Endpoints: `/api/summary`, `/api/history`, `/api/forecast`, `/api/yearly`, `POST /api/sync`. A sync runs on startup (lifespan) unless `sync_on_start=False`. Missing config serves a setup page instead of erroring.
+- `app.py` — `create_app()` factory (used with uvicorn `--factory`). Endpoints: `/api/summary`, `/api/history`, `/api/halfhourly`, `/api/monthly`, `/api/heatmap`, `/api/forecast`, `/api/yearly`, `/api/weather`, `POST /api/sync`. A sync runs on startup (lifespan) unless `sync_on_start=False`. Missing config serves a setup page instead of erroring.
 - `octopus_client.py` — thin httpx wrapper; HTTP Basic auth (API key as username, blank password), pagination, retries on 429/5xx. Accepts a `transport` for tests.
 - `sync.py` — discovers meters/tariffs from the account endpoint, backfills up to 730 days of half-hourly readings, then fetches incrementally from the newest stored interval. Rate rows are clipped to each agreement's window (`_clip_row`) because the products API returns full rate history and the rates tables are keyed on `(fuel, valid_from)` alone.
 - `db.py` — schema + queries. Tables: `readings`, `rates`, `standing_charges`, `meta` (key/value: `last_sync`, `{fuel}_serial`, `gas_unit`).
 - `costs.py` — matches half-hourly readings to unit rates via bisect; gas m³→kWh conversion (SMETS2 meters report m³, detected heuristically on first sync and remembered in `meta`).
+- `weather.py` — local temperatures for the dashboard's weather card: account postcode (stored by sync) → postcodes.io geocode (cached in `meta`) → open-meteo daily/hourly temps (dailies cached in `weather_daily`). Every failure path returns None and `/api/weather` degrades to `{"available": false}` — third-party outages must never break the dashboard.
 - `forecast.py` — statistical forecast: seasonal baseline (±14 days around the same date in prior years) × day-of-week factor, falling back to a recent-weighted mean with under a year of history.
 - `yearly.py` — monthly actual/forecast buckets and rolling-365/calendar-year totals.
 - `static/` — no-framework frontend (`app.js` + `index.html`), Chart.js vendored as `chart.umd.js`. Served with `Cache-Control: no-cache`.

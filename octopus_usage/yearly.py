@@ -62,6 +62,23 @@ def monthly_buckets(daily, points, today, rate, sc):
     return out
 
 
+def months_of_year(daily, year):
+    """Actual calendar-month buckets for one year: kwh, raw units, None-propagating cost."""
+    buckets = {}
+    for d in daily:
+        if d["date"].year != year:
+            continue
+        b = buckets.setdefault(_month_key(d["date"]), {"kwh": 0.0, "units": 0.0, "costs": []})
+        b["kwh"] += d["kwh"]
+        b["units"] += d["units"]
+        b["costs"].append(d["cost_pence"])
+    return [
+        {"month": key, "kwh": b["kwh"], "units": b["units"],
+         "cost_pence": sum(b["costs"]) if None not in b["costs"] else None}
+        for key, b in sorted(buckets.items())
+    ]
+
+
 def _window(daily, start, end):
     """kWh and None-propagating cost over daily rows with start <= date <= end."""
     sel = [d for d in daily if start <= d["date"] <= end]

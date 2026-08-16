@@ -163,6 +163,22 @@ def test_setup_page_when_unconfigured(tmp_path, monkeypatch):
         assert client.get("/api/summary").status_code == 503
 
 
+def test_monthly_endpoint(tmp_path):
+    app = make_test_app(tmp_path, seed=seed_elec_60_days)
+    with TestClient(app) as client:
+        year = (date.today() - timedelta(days=1)).year
+        data = client.get("/api/monthly", params={"fuel": "electricity", "year": year}).json()
+        assert data["months"], "expected month buckets"
+        m = data["months"][-1]
+        assert set(m) == {"month", "kwh", "units", "cost_pence"}
+        assert m["month"].startswith(str(year))
+        empty = client.get("/api/monthly", params={"fuel": "electricity", "year": 2001}).json()
+        assert empty == {"months": []}
+        assert client.get("/api/monthly", params={"fuel": "water", "year": year}).status_code == 422
+        assert client.get("/api/monthly", params={"fuel": "electricity", "year": 1999}).status_code == 422
+        assert client.get("/api/monthly", params={"fuel": "gas", "year": year}).status_code == 404
+
+
 def test_yearly_endpoint(tmp_path):
     app = make_test_app(tmp_path, seed=seed_elec_60_days)
     with TestClient(app) as client:

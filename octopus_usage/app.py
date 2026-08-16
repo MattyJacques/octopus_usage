@@ -173,6 +173,17 @@ def create_app(config: Config | None = None, transport=None, sync_on_start: bool
             })
         return {"points": points}
 
+    @app.get("/api/monthly")
+    def monthly(fuel: str, year: int):
+        guard()
+        check_fuel(fuel)
+        if not 2000 <= year <= 2100:
+            raise HTTPException(status_code=422, detail="year must be 2000-2100")
+        daily = costs.daily_costs(app.state.conn, fuel)
+        if not daily:
+            raise HTTPException(status_code=404, detail=f"no data for {fuel}")
+        return {"months": yearly.months_of_year(daily, year)}
+
     @app.get("/api/yearly")
     def get_yearly():
         guard()

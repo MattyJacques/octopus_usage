@@ -109,3 +109,26 @@ def test_totals_calendar_current_combines_actual_and_clipped_forecast():
     assert t["calendar_current"]["cost_pence"] == (
         actual_days * 288.0 + fc_days * 20.0 * 10.0 + fc_days * 48.0
     )
+
+
+def test_months_of_year_buckets_only_that_year():
+    daily = make_daily(date(2025, 12, 30), date(2026, 2, 2))
+    for d in daily:
+        d["units"] = d["kwh"] / 2
+    months = yearly.months_of_year(daily, 2026)
+    assert [m["month"] for m in months] == ["2026-01", "2026-02"]
+    jan = months[0]
+    assert jan["kwh"] == 31 * 24.0
+    assert jan["units"] == 31 * 12.0
+    assert jan["cost_pence"] == 31 * 288.0
+    assert yearly.months_of_year(daily, 2020) == []
+
+
+def test_months_of_year_propagates_none_cost():
+    daily = make_daily(date(2026, 1, 1), date(2026, 1, 31))
+    for d in daily:
+        d["units"] = d["kwh"]
+    daily[5]["cost_pence"] = None
+    months = yearly.months_of_year(daily, 2026)
+    assert months[0]["cost_pence"] is None
+    assert months[0]["kwh"] == 31 * 24.0

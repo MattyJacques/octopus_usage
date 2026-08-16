@@ -10,6 +10,9 @@ const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep
 const PRESETS = [
   ['yesterday', 'Yesterday'], ['7d', 'Last 7 days'], ['month', 'This month'], ['year', 'Calendar year'],
 ];
+const FC_PRESETS = [
+  ['30d', 'Next 30 days'], ['12m', 'Next 12 months'],
+];
 const NAV = [
   ['usage', 'Usage'], ['forecast', 'Forecast'], ['meters', 'Meters'], ['tariff', 'Tariff'], ['settings', 'Settings'],
 ];
@@ -17,6 +20,7 @@ const NAV = [
 const state = {
   screen: 'usage',
   preset: 'month',
+  fcPreset: '12m',
   year: new Date().getFullYear(),
   on: { electricity: true, gas: true },
   heatFuel: 'electricity',
@@ -79,6 +83,10 @@ function prettyDate(dateStr) {
 
 function weekdayAbbr(dateStr) {
   return new Date(dateStr + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'short' });
+}
+
+function dayMonth(dateStr) {
+  return new Date(dateStr + 'T12:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
 
 function monthShort(ym) {
@@ -515,6 +523,116 @@ function fcChartSVG(series, color, soft) {
 }
 
 async function renderForecast(summary) {
+  if (state.fcPreset === '30d') return renderForecast30(summary);
+  return renderForecast12(summary);
+}
+
+function fc30ChartSVG(points, color, soft) {
+  const n = points.length;
+  if (n < 2) return '<div class="empty-note">Not enough history to forecast yet</div>';
+  const max = Math.max(...points.map(p => p.upper)) * 1.1 || 1;
+  const X = i => (i / (n - 1) * 1000).toFixed(1);
+  const Y = v => (200 - v / max * 190).toFixed(1);
+  let band = `M ${X(0)} ${Y(points[0].upper)}`;
+  for (let i = 1; i < n; i++) band += ` L ${X(i)} ${Y(points[i].upper)}`;
+  for (let i = n - 1; i >= 0; i--) band += ` L ${X(i)} ${Y(points[i].lower)}`;
+  band += ' Z';
+  let mid = `M ${X(0)} ${Y(points[0].kwh)}`;
+  for (let i = 1; i < n; i++) mid += ` L ${X(i)} ${Y(points[i].kwh)}`;
+  const axis = points.map((p, i) => `<span>${i % 7 === 0 && i < n - 3 ? dayMonth(p.date) : ''}</span>`).join('');
+  return `<svg viewBox="0 0 1000 200" preserveAspectRatio="none" style="width:100%;height:150px;display:block">
+      <path d="${band}" fill="${soft}"></path>
+      <path d="${mid}" fill="none" stroke="${color}" stroke-width="2" stroke-dasharray="5 4" vector-effect="non-scaling-stroke"></path>
+    </svg>
+    <div class="fc-axis">${axis}</div>`;
+}
+
+async function renderForecast30(summary) {
+  const factor = summary.gas_m3_to_kwh;
+  const data = {};
+  const active = [];
+  for (const f of FUEL_KEYS) {
+    if (!state.on[f]) continue;
+    const fc = await api(`/api/forecast?fuel=${f}`);
+    if (fc && fc.points.length) { data[f] = fc.points; active.push(f); }
+  }
+  const dispUnits = (f, kwh) => (f === 'gas' ? kwh / factor : kwh);
+
+  const cards = active.map(f => {
+    const meta = FUEL_META[f];
+    const pts = data[f];
+    const totKwh = pts.reduce((a, p) => a + p.kwh, 0);
+    const totCost = sumOrNull(pts.map(p => p.cost_pence));
+    return `<div class="chart-card">
+      <div class="chart-head">
+        <div class="chart-title"><span class="dot" style="background:${meta.color}"></span>
+          <span class="name">${meta.name}</span>
+          <span class="sub">daily ${meta.unit}</span></div>
+        <div class="chart-totals"><span class="units" style="color:${meta.color}">
+          ${fmtUnits(dispUnits(f, totKwh), meta.unit)} · ${money(totCost)}</span></div>
+      </div>
+      ${fc30ChartSVG(pts, meta.color, meta.soft)}
+    </div>`;
+  }).join('');
+  document.getElementById('forecast-charts').innerHTML =
+    cards || '<div class="chart-card"><div class="empty-note">Not enough history to forecast yet</div></div>';
+
+  const rail = document.getElementById('forecast-rail');
+  if (!active.length) { rail.innerHTML = ''; return; }
+
+  const dates = data[active[0]].map(p => p.date);
+  const byDate = f => new Map((data[f] || []).map(p => [p.date, p]));
+  const maps = Object.fromEntries(active.map(f => [f, byDate(f)]));
+
+  const weeks = [];
+  for (const d of dates) {
+    const monday = new Date(d + 'T12:00:00Z').getUTCDay() === 1;
+    if (!weeks.length || monday) weeks.push([]);
+    weeks[weeks.length - 1].push(d);
+  }
+
+  const rows = weeks.map(wk => {
+    const sums = f => wk.reduce((a, d) => a + ((maps[f].get(d) || {}).kwh || 0), 0);
+    const mid = sumOrNull(active.flatMap(f => wk.map(d => (maps[f].get(d) || {}).cost_pence)));
+    return `<div class="fc-row">
+      <span class="fc-c-month">${dayMonth(wk[0])}</span>
+      <span class="fc-c-kwh">${maps.electricity ? fmtNum(Math.round(sums('electricity'))) : '—'}</span>
+      <span class="fc-c-m3">${maps.gas ? fmtNum(Math.round(sums('gas') / factor)) : '—'}</span>
+      <span class="fc-c-low">${money0(mid == null ? null : mid * 0.86)}</span>
+      <span class="fc-c-mid">${money0(mid)}</span>
+      <span class="fc-c-high">${money0(mid == null ? null : mid * 1.19)}</span>
+    </div>`;
+  }).join('');
+
+  const totalMid = sumOrNull(active.map(f => sumOrNull(data[f].map(p => p.cost_pence))));
+  const unitTotals = active.map(f => {
+    const tot = data[f].reduce((a, p) => a + p.kwh, 0);
+    return fmtUnits(Math.round(dispUnits(f, tot)), FUEL_META[f].unit);
+  }).join(' · ');
+  const windowLabel = `${dayMonth(dates[0])} – ${dayMonth(dates[dates.length - 1])}`;
+
+  rail.innerHTML = `
+    <div class="hero">
+      <span class="mono-label">Projected — ${windowLabel}</span>
+      <div class="hero-row">
+        <span class="hero-value">${money(totalMid)}</span>
+        <span class="hero-units">${unitTotals}</span>
+      </div>
+      <span class="hero-line">${totalMid == null ? '' : `${money(totalMid * 0.86)} – ${money(totalMid * 1.19)}`}</span>
+    </div>
+    <div class="fc-table">
+      <div class="fc-head">
+        <span class="fc-c-month">W/c</span><span class="fc-c-kwh">kWh</span>
+        <span class="fc-c-m3">m³</span><span class="fc-c-low">Low</span>
+        <span class="fc-c-mid">Exp.</span><span class="fc-c-high">High</span>
+      </div>
+      ${rows}
+    </div>
+    <span class="fc-note">Band shows the model's daily range; low assumes −14% demand, high +19%.
+      Tariff held at current unit rates.</span>`;
+}
+
+async function renderForecast12(summary) {
   const yearlyData = await api('/api/yearly');
   const factor = summary.gas_m3_to_kwh;
   const todayYm = londonToday().slice(0, 7);
@@ -601,8 +719,11 @@ function renderChrome(summary) {
       class="${state.screen === id ? 'active' : ''}"><span class="dot"></span>${label}</button>`;
   }).join('');
 
-  document.getElementById('presets').innerHTML = PRESETS.map(([id, label]) =>
-    `<button type="button" data-preset="${id}" class="${state.preset === id ? 'active' : ''}">${label}</button>`).join('');
+  document.getElementById('presets').innerHTML = state.screen === 'forecast'
+    ? FC_PRESETS.map(([id, label]) =>
+      `<button type="button" data-fcpreset="${id}" class="${state.fcPreset === id ? 'active' : ''}">${label}</button>`).join('')
+    : PRESETS.map(([id, label]) =>
+      `<button type="button" data-preset="${id}" class="${state.preset === id ? 'active' : ''}">${label}</button>`).join('');
 
   const minYear = summary && summary.first_data
     ? parseInt(summary.first_data.slice(0, 4), 10) : state.year;
@@ -668,6 +789,8 @@ document.addEventListener('click', async e => {
   if (nav && !nav.disabled) { state.screen = nav.dataset.nav; render(); return; }
   const preset = e.target.closest('[data-preset]');
   if (preset) { state.preset = preset.dataset.preset; render(); return; }
+  const fcPreset = e.target.closest('[data-fcpreset]');
+  if (fcPreset) { state.fcPreset = fcPreset.dataset.fcpreset; render(); return; }
   const chip = e.target.closest('[data-fuel]');
   if (chip) { state.on[chip.dataset.fuel] = !state.on[chip.dataset.fuel]; render(); return; }
   const heat = e.target.closest('[data-heat]');
